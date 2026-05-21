@@ -1,0 +1,2539 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# 🤖 AI Workloads - WAF Discovery Workbook\r\n\r\nA **one-click, read-only** Level 100/200 assessment of every AI-related Azure resource in the selected subscriptions, scored against the five **Well-Architected Framework** pillars.\r\n\r\n- ✅ **Zero deployment cost** - uses Azure Resource Graph only (no Log Analytics, no agents).\r\n- ✅ **Live data** - click the **🔄 Refresh** icon in the toolbar to re-evaluate at any time.\r\n- ✅ **Stakeholder ready** - start at the scorecard, drill into pillars, export the findings list.\r\n\r\n**Scope:** Azure OpenAI, AI Foundry, AI Services / Cognitive accounts, model deployments, Azure ML workspaces, AI Search services, online endpoints, and ML compute."
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "subs-param",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscriptions",
+            "label": "Subscriptions",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "value": [
+              "value::all"
+            ]
+          },
+          {
+            "id": "tagkey-param",
+            "version": "KqlParameterItem/1.0",
+            "name": "RequiredTagKey",
+            "label": "Required tag key(s) — comma-separated (Ops check)",
+            "type": 1,
+            "isRequired": false,
+            "value": "Owner"
+          },
+          {
+            "id": "search-param",
+            "version": "KqlParameterItem/1.0",
+            "name": "NameFilter",
+            "label": "Filter (name contains)",
+            "type": 1,
+            "isRequired": false,
+            "value": ""
+          }
+        ],
+        "style": "pills",
+        "queryType": 0
+      },
+      "name": "global-params"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### 👔 Executive Summary\r\n\r\nUse the scorecards below for an at-a-glance view of your **AI estate** and **risk posture** across the five Azure Well-Architected Framework pillars. On each pillar tile, the large red number is **High-severity** findings; the smaller number is **Total findings (High + Medium + Low)**.\r\n\r\n> **How to use this workbook**\r\n> 1. Pick subscriptions and (optionally) a name filter above.\r\n> 2. Review the scorecards on this header band - they always reflect the current filter.\r\n> 3. Drill into a pillar tab below for the underlying evidence.\r\n> 4. Open the **📋 All Findings** tab for a single, exportable backlog.\r\n> 5. Click the **🔄 Refresh** icon in the workbook toolbar at any time."
+      },
+      "name": "exec-intro"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\r\n| where type =~ 'microsoft.cognitiveservices/accounts'\r\n| summarize Value=count() | extend KPI='AI / Cognitive accounts', Icon='🤖', Sort=1\r\n| union (\r\n    resources\r\n    | where '{NameFilter}' == '' or name contains '{NameFilter}'\r\n    | where type =~ 'microsoft.cognitiveservices/accounts/projects'\r\n    | summarize Value=count() | extend KPI='Foundry projects', Icon='🧠', Sort=2)\r\n| union (\r\n    resources\r\n    | where '{NameFilter}' == '' or name contains '{NameFilter}'\r\n    | where type =~ 'microsoft.machinelearningservices/workspaces'\r\n    | summarize Value=count() | extend KPI='ML / Foundry workspaces', Icon='🧪', Sort=3)\r\n| union (\r\n    resources\r\n    | where '{NameFilter}' == '' or name contains '{NameFilter}'\r\n    | where type =~ 'microsoft.search/searchservices'\r\n    | summarize Value=count() | extend KPI='AI Search services', Icon='🔍', Sort=4)\r\n| union (\r\n    resources\r\n    | where '{NameFilter}' == '' or name contains '{NameFilter}'\r\n    | where type =~ 'microsoft.machinelearningservices/workspaces/computes' or type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints'\r\n    | summarize Value=count() | extend KPI='Compute & endpoints', Icon='⚡', Sort=5)\r\n| order by Sort asc\r\n| project KPI=strcat(Icon, ' ', KPI), Value",
+        "size": 3,
+        "title": "AI Estate Inventory",
+        "noDataMessage": "No AI workloads were discovered in this scope. Adjust the Subscriptions filter above or deploy at least one AI / Cognitive / ML / Search resource to begin.",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "KPI",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "blue"
+            }
+          },
+          "showBorder": true,
+          "size": "auto"
+        }
+      },
+      "name": "exec-inventory"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// === SHARED FINDINGS LOGIC — keep in sync via fix-issues.py ===\n// Resource Graph does not index Microsoft.CognitiveServices/accounts/deployments,\n// so model-deployment findings are intentionally absent. Use the 🕒 Model Lifecycle\n// tab for live deployment data via ARM REST.\n// ARG limits queries to 6 joins, so all 4 resource types are unioned first and the\n// lock / PE / ML-child lookups are applied once via 3 leftouter joins.\nresources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces','microsoft.cognitiveservices/accounts/projects')\n| where ('{NameFilter}' == '' or name contains '{NameFilter}')\n| extend _lowerId = tolower(id), _t = tolower(tostring(type))\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.authorization/locks'\n    | extend Scope = tolower(tostring(split(id,'/providers/Microsoft.Authorization/locks/')[0]))\n    | summarize LockCount = count() by Scope\n  ) on $left._lowerId == $right.Scope\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.network/privateendpoints'\n    | mv-expand conn = properties.privateLinkServiceConnections\n    | extend TargetId = tolower(tostring(conn.properties.privateLinkServiceId))\n    | summarize PeCount = count() by TargetId\n  ) on $left._lowerId == $right.TargetId\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints' or type =~ 'microsoft.machinelearningservices/workspaces/computes'\n    | extend Parent = tostring(split(id,'/')[8])\n    | summarize Children = count() by Parent\n  ) on $left.name == $right.Parent\n| extend _missingTags = set_difference(split('{RequiredTagKey}', ','), bag_keys(tags))\n| extend _findings = pack_array(\n    // Public network access (cognitive + search + ML)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces') and tostring(properties.publicNetworkAccess) =~ 'Enabled',\n        bag_pack('Pillar','Security','Severity','High','Check','Public network access is Enabled','Value',tostring(properties.publicNetworkAccess),'Recommendation','Disable public network access and use Private Endpoints + service-tag restrictions.','Doc','https://learn.microsoft.com/azure/ai-services/cognitive-services-virtual-networks'), dynamic(null)),\n    // Local auth (cognitive + search)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices') and tobool(properties.disableLocalAuth) != true,\n        bag_pack('Pillar','Security','Severity',iff(_t =~ 'microsoft.search/searchservices','Medium','High'),'Check','Local auth (API keys) enabled','Value','Enabled','Recommendation','Disable local auth and require Entra ID with managed identity / RBAC.','Doc','https://learn.microsoft.com/azure/ai-services/authentication'), dynamic(null)),\n    // PE-gap (cognitive + search + ML)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces') and (isnull(PeCount) or PeCount == 0),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No Private Endpoint attached','Value','0 endpoints','Recommendation','Attach a Private Endpoint to keep traffic on the Microsoft backbone.','Doc','https://learn.microsoft.com/azure/private-link/private-endpoint-overview'), dynamic(null)),\n    // CMK (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and isnull(properties.encryption.keyVaultProperties),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No customer-managed key (CMK)','Value','Microsoft-managed','Recommendation','If compliance requires it, configure CMK in Key Vault for data at rest.','Doc','https://learn.microsoft.com/azure/ai-services/encryption/cognitive-services-encryption-keys-portal'), dynamic(null)),\n    // Managed identity (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and (isempty(tostring(identity.type)) or tostring(identity.type) =~ 'None'),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No managed identity','Value','None','Recommendation','Assign system or user-assigned managed identity so dependencies use Entra ID, not keys.','Doc','https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview'), dynamic(null)),\n    // HBI (ML only)\n    iff(_t =~ 'microsoft.machinelearningservices/workspaces' and tobool(properties.hbiWorkspace) != true,\n        bag_pack('Pillar','Security','Severity','Low','Check','ML workspace not flagged as HBI','Value','hbiWorkspace=false','Recommendation','If workspace handles regulated data, enable High Business Impact at create time.','Doc','https://learn.microsoft.com/azure/machine-learning/concept-data-encryption'), dynamic(null)),\n    // F0 SKU (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and tostring(sku.name) =~ 'F0',\n        bag_pack('Pillar','Reliability','Severity','High','Check','Free (F0) SKU in use - no SLA','Value','F0','Recommendation','Move production workloads to Standard (S0+) SKU for SLA coverage.','Doc','https://learn.microsoft.com/azure/ai-services/cognitive-services-limited-access'), dynamic(null)),\n    // Search replicas (search only)\n    iff(_t =~ 'microsoft.search/searchservices' and toint(properties.replicaCount) < 2,\n        bag_pack('Pillar','Reliability','Severity','High','Check','AI Search has <2 replicas','Value',tostring(toint(properties.replicaCount)),'Recommendation','Use 2+ replicas for read SLA, 3+ for read/write SLA.','Doc','https://learn.microsoft.com/azure/search/search-capacity-planning'), dynamic(null)),\n    // Foundry project provisioning state (projects only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts/projects' and tostring(properties.provisioningState) !~ 'Succeeded',\n        bag_pack('Pillar','Reliability','Severity','Medium','Check','Foundry project not in Succeeded state','Value',tostring(properties.provisioningState),'Recommendation','Investigate provisioning state; re-provision or delete the project.','Doc','https://learn.microsoft.com/azure/ai-foundry/'), dynamic(null)),\n    // Idle ML workspace (ML only)\n    iff(_t =~ 'microsoft.machinelearningservices/workspaces' and (isnull(Children) or Children == 0),\n        bag_pack('Pillar','Cost','Severity','Low','Check','ML workspace has no compute or endpoints','Value','0 children','Recommendation','Confirm workspace is in use; delete if abandoned.','Doc','https://learn.microsoft.com/azure/machine-learning/how-to-manage-workspace'), dynamic(null)),\n    // Missing tags (all 4 types)\n    iff(array_length(_missingTags) > 0,\n        bag_pack('Pillar','Operational Excellence','Severity','Medium','Check',strcat('Missing required tag(s): ', strcat_array(_missingTags, ', ')),'Value','(empty)','Recommendation','Apply organizational tagging standard (Owner, CostCenter, Env).','Doc','https://learn.microsoft.com/azure/azure-resource-manager/management/tag-resources'), dynamic(null)),\n    // Missing lock (all 4 types)\n    iff(isnull(LockCount) or LockCount == 0,\n        bag_pack('Pillar','Operational Excellence','Severity','Low','Check','No resource lock','Value','0 locks','Recommendation','Apply a CanNotDelete lock on production AI resources to prevent accidental deletion.','Doc','https://learn.microsoft.com/azure/azure-resource-manager/management/lock-resources'), dynamic(null)))\n| mv-expand finding = _findings\n| where isnotnull(finding) and tostring(finding) != ''\n| project Resource=name, Type=type, Pillar=tostring(finding.Pillar), Severity=tostring(finding.Severity), Check=tostring(finding.Check), Value=tostring(finding.Value), Recommendation=tostring(finding.Recommendation), Doc=tostring(finding.Doc), Subscription=subscriptionId, ResourceGroup=resourceGroup, ResourceId=id\n\n| summarize High = countif(Severity == 'High'), Medium = countif(Severity == 'Medium'), Low = countif(Severity == 'Low') by Pillar\n| extend Total = High + Medium + Low\n| extend Sort = case(Pillar == 'Security', 1, Pillar == 'Reliability', 2, Pillar == 'Cost', 3, Pillar == 'Operational Excellence', 4, 9)\n| extend Icon = case(Pillar == 'Security', '🛡️', Pillar == 'Reliability', '🔄', Pillar == 'Cost', '💰', Pillar == 'Operational Excellence', '⚙️', '*')\n| project Pillar = strcat(Icon, ' ', Pillar), High, Medium, Low, Total, Sort\n| order by Sort asc\n| project-away Sort\n",
+        "size": 3,
+        "title": "Risk Scorecard by WAF Pillar (large number = High-severity, subtitle = Total findings)",
+        "noDataMessage": "🎉 No findings detected across discovered AI resources in this scope. (Add resources or relax the name filter to expand.)",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Pillar",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "High",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redBright",
+              "aggregation": "Sum"
+            }
+          },
+          "subtitleContent": {
+            "columnMatch": "Total",
+            "formatter": 1
+          },
+          "showBorder": true,
+          "size": "auto"
+        }
+      },
+      "name": "exec-risk"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "tab-param",
+            "version": "KqlParameterItem/1.0",
+            "name": "SelectedTab",
+            "type": 10,
+            "isRequired": true,
+            "value": "overview",
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\": \"overview\", \"label\": \"📊 Overview\", \"selected\": true}, {\"value\": \"security\", \"label\": \"🛡️ Security\"}, {\"value\": \"reliability\", \"label\": \"🔄 Reliability\"}, {\"value\": \"cost\", \"label\": \"💰 Cost\"}, {\"value\": \"ops\", \"label\": \"⚙️ Operational Excellence\"}, {\"value\": \"models\", \"label\": \"🕒 Model Lifecycle\"}, {\"value\": \"findings\", \"label\": \"📋 All Findings\"}]"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0
+      },
+      "name": "tabs"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 📊 Overview\n\n**Stakeholder takeaway:** how much AI is in this estate, where it runs, and how it is distributed. Start here to scope the conversation."
+      },
+      "name": "overview-header",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      }
+    },
+    {
+      "type": 3,
+      "name": "overview-kpis",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.cognitiveservices/accounts/projects','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| summarize Value=count() | extend KPI='Total AI resources', Icon='📊', Sort=1\n| union (\n    resources\n    | where type in~ ('microsoft.cognitiveservices/accounts','microsoft.cognitiveservices/accounts/projects','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n    | where '{NameFilter}' == '' or name contains '{NameFilter}'\n    | summarize Value=dcount(subscriptionId) | extend KPI='Subscriptions in scope', Icon='🗂️', Sort=2)\n| union (\n    resources\n    | where type in~ ('microsoft.cognitiveservices/accounts','microsoft.cognitiveservices/accounts/projects','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n    | where '{NameFilter}' == '' or name contains '{NameFilter}'\n    | extend Created = coalesce(todatetime(properties.dateCreated), todatetime(properties.creationTime), todatetime(properties.dateModified))\n    | where isnotnull(Created) and Created > ago(30d)\n    | summarize Value=count() | extend KPI='Added in last 30 days', Icon='🆕', Sort=3)\n| union (\n    resources\n    | where type in~ ('microsoft.cognitiveservices/accounts','microsoft.cognitiveservices/accounts/projects','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n    | where '{NameFilter}' == '' or name contains '{NameFilter}'\n    | summarize Value=dcount(location) | extend KPI='Regions in use', Icon='🌍', Sort=4)\n| order by Sort asc\n| project KPI=strcat(Icon, ' ', KPI), Value",
+        "size": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "KPI",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "blue"
+            }
+          },
+          "showBorder": true,
+          "size": "auto"
+        }
+      },
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.cognitiveservices/accounts/projects','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| summarize Count=count() by Type=case(\n    type =~ 'microsoft.cognitiveservices/accounts' and tolower(tostring(kind)) contains 'openai', '🤖 Azure OpenAI',\n    type =~ 'microsoft.cognitiveservices/accounts' and tolower(tostring(kind)) == 'aiservices', '🧠 AI Services (multi-service)',\n    type =~ 'microsoft.cognitiveservices/accounts/projects', '🧩 AI Foundry Project (Cognitive)',\n    type =~ 'microsoft.cognitiveservices/accounts', strcat('🤖 Cognitive - ', tostring(kind)),\n    type =~ 'microsoft.machinelearningservices/workspaces' and tolower(tostring(kind)) == 'hub', '🏛️ AI Foundry Hub',\n    type =~ 'microsoft.machinelearningservices/workspaces' and tolower(tostring(kind)) == 'project', '🧩 AI Foundry Project',\n    type =~ 'microsoft.machinelearningservices/workspaces', '🧪 Azure ML Workspace',\n    type =~ 'microsoft.search/searchservices', '🔍 AI Search',\n    '❓ Other')\n| order by Count desc",
+        "size": 4,
+        "title": "AI resource inventory",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Type",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Count",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "showBorder": true
+        }
+      },
+      "name": "overview-tiles",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.cognitiveservices/accounts/projects','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend Category = case(\n    type =~ 'microsoft.cognitiveservices/accounts' and tolower(tostring(kind)) contains 'openai', '🤖 Azure OpenAI',\n    type =~ 'microsoft.cognitiveservices/accounts' and tolower(tostring(kind)) == 'aiservices', '🧠 AI Services (multi-service)',\n    type =~ 'microsoft.cognitiveservices/accounts/projects', '🧩 AI Foundry Project (Cognitive)',\n    type =~ 'microsoft.cognitiveservices/accounts', strcat('🤖 Cognitive - ', tostring(kind)),\n    type =~ 'microsoft.machinelearningservices/workspaces' and tolower(tostring(kind)) == 'hub', '🏛️ AI Foundry Hub',\n    type =~ 'microsoft.machinelearningservices/workspaces' and tolower(tostring(kind)) == 'project', '🧩 AI Foundry Project',\n    type =~ 'microsoft.machinelearningservices/workspaces', '🧪 Azure ML Workspace',\n    type =~ 'microsoft.search/searchservices', '🔍 AI Search',\n    '❓ Other')\n| extend _kind = tostring(kind), _sku = tostring(sku.name)\n| extend _owner = coalesce(tostring(tags.Owner), tostring(tags.owner), '')\n| extend _env = coalesce(tostring(tags.Env), tostring(tags.Environment), tostring(tags.env), tostring(tags.environment), '')\n| extend TagCount = coalesce(array_length(bag_keys(tags)), 0)\n| project\n    Name = name,\n    Category,\n    Kind = iif(isempty(_kind), '—', _kind),\n    SKU = iif(isempty(_sku), '—', _sku),\n    Location = iif(isempty(location), '🟰 global', strcat('🌍 ', location)),\n    Owner = iif(isempty(_owner), '🔴 (missing)', strcat('✅ ', _owner)),\n    Env = iif(isempty(_env), '🟡 (missing)', strcat('✅ ', _env)),\n    TagCount,\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| order by Category asc, Name asc",
+        "size": 0,
+        "title": "All AI resources",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "TagCount",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  },
+                  {
+                    "operator": "<",
+                    "thresholdValue": "3",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "overview-grid",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.cognitiveservices/accounts/projects','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend Category = case(\n    type =~ 'microsoft.cognitiveservices/accounts' and tolower(tostring(kind)) contains 'openai', '🤖 Azure OpenAI',\n    type =~ 'microsoft.cognitiveservices/accounts' and tolower(tostring(kind)) == 'aiservices', '🧠 AI Services (multi-service)',\n    type =~ 'microsoft.cognitiveservices/accounts/projects', '🧩 AI Foundry Project (Cognitive)',\n    type =~ 'microsoft.cognitiveservices/accounts', strcat('🤖 Cognitive - ', tostring(kind)),\n    type =~ 'microsoft.machinelearningservices/workspaces' and tolower(tostring(kind)) == 'hub', '🏛️ AI Foundry Hub',\n    type =~ 'microsoft.machinelearningservices/workspaces' and tolower(tostring(kind)) == 'project', '🧩 AI Foundry Project',\n    type =~ 'microsoft.machinelearningservices/workspaces', '🧪 Azure ML Workspace',\n    type =~ 'microsoft.search/searchservices', '🔍 AI Search',\n    '❓ Other')\n| extend Location = iif(isempty(location), 'global', location)\n| summarize Resources = count() by Location, Category\n| order by Resources desc",
+        "size": 0,
+        "title": "Distribution by region",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "Location",
+          "yAxis": [
+            "Resources"
+          ],
+          "group": "Category",
+          "createOtherGroup": 0,
+          "showLegend": true
+        }
+      },
+      "name": "overview-regions",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      }
+    },
+    {
+      "type": 3,
+      "name": "overview-by-sub",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.cognitiveservices/accounts/projects','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| summarize AIResources=count() by subscriptionId\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, SubName=name\n  ) on subscriptionId\n| project SubscriptionName=coalesce(SubName, subscriptionId), AIResources\n| order by AIResources desc",
+        "size": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "tiles",
+        "title": "AI footprint by subscription",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "SubscriptionName",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "AIResources",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "blueDark"
+            }
+          },
+          "showBorder": true,
+          "size": "auto"
+        }
+      },
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🛡️ Security\n\n**Stakeholder takeaway:** are AI services hardened against the public internet, identity-only (Entra ID, not API keys), and encrypted with customer-managed keys where required?\n\n**What 'good' looks like for an AI workload:**\n- 🟢 **Public network access = Disabled** + 🟢 **≥ 1 Private Endpoint**\n- 🟢 **Local auth disabled** (API keys off, Entra ID only)\n- 🟢 **Customer-managed key (CMK)** for sensitive / regulated data\n- 🟢 **Managed Identity assigned** (System or User) so downstream calls don't need secrets\n- 🟢 **Network ACL default = Deny** / **ML isolation = AllowOnlyApprovedOutbound**\n\nEach row's **Risk** column counts how many of the above controls are missing — sort by Risk ⬇ to triage."
+      },
+      "name": "security-header",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "security"
+      }
+    },
+    {
+      "type": 3,
+      "name": "security-posture",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend pna = tostring(properties.publicNetworkAccess),\n         dla = tobool(properties.disableLocalAuth),\n         cmk = iif(type =~ 'microsoft.search/searchservices',\n                   tostring(properties.encryptionWithCmk.enforcement) =~ 'Enabled',\n                   isnotnull(properties.encryption.keyVaultProperties)),\n         mi  = tostring(identity.type),\n         pe  = iif(type =~ 'microsoft.cognitiveservices/accounts',\n                   coalesce(array_length(todynamic(tostring(properties.privateEndpointConnections))),0),\n                   0)\n| summarize\n    Total = count(),\n    PublicBlocked = countif(pna =~ 'Disabled'),\n    KeysDisabled  = countif(dla == true),\n    HasCMK        = countif(cmk),\n    HasManagedId  = countif(isnotempty(mi) and mi !~ 'None'),\n    HasPrivateEP  = countif(pe > 0)\n| project Total, KPIs = pack(\n    '🌐 Public access blocked', PublicBlocked,\n    '🔑 Local auth keys disabled', KeysDisabled,\n    '🔐 Customer-managed key', HasCMK,\n    '🪪 Managed identity assigned', HasManagedId,\n    '🛡️ Private endpoint attached', HasPrivateEP)\n| mv-expand kv = KPIs\n| extend KPI = tostring(bag_keys(kv)[0])\n| extend Value = toint(kv[KPI])\n| extend Score = strcat(Value, ' / ', Total),\n         Status = case(Value == Total, '🟢', Value == 0, '🔴', '🟡')\n| project KPI, Status, Score\n| order by KPI asc",
+        "size": 3,
+        "title": "Security posture across all AI resources",
+        "queryType": 0,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "KPI",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Status",
+            "formatter": 1
+          },
+          "subtitleContent": {
+            "columnMatch": "Score",
+            "formatter": 1
+          },
+          "showBorder": true,
+          "size": "auto"
+        }
+      },
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "security"
+      }
+    },
+    {
+      "type": 1,
+      "name": "security-risk-legend",
+      "content": {
+        "json": "### 📊 Risk score legend\n\nEach row's **Risk** column = number of failed checks (lower is better). Threshold colors: 🟢 **0** · 🟡 **1–2** · 🔴 **3+**.\n\n| Check (one point each when failing) | 🤖 Cognitive / OpenAI | 🧪 Azure ML | 🔍 AI Search |\n|---|:-:|:-:|:-:|\n| Public network access ≠ **Disabled** | ✅ | ✅ | ✅ |\n| Local auth (API keys) not disabled | ✅ | — | ✅ |\n| HBI workspace flag not set | — | ✅ | — |\n| No customer-managed key (CMK) | ✅ | ✅ | ✅ (`Enabled` enforcement) |\n| No managed identity assigned | ✅ | ✅ | — |\n| Zero private endpoints attached | ✅ | — | — |\n| Network ACL default ≠ **Deny** | ✅ | — | — |\n| Managed network isolation ≠ **AllowOnlyApprovedOutbound** | — | ✅ | — |\n| Auth mode = **apiKeyOnly** (no Entra) | — | — | ✅ |\n\n**Max possible Risk:** Cognitive = 6 · Azure ML = 5 · AI Search = 4. Sort the grid by **Risk ⬇** to triage worst offenders first."
+      },
+      "customWidth": "100",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "security"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _pna = tostring(properties.publicNetworkAccess),\n         _dla = tobool(properties.disableLocalAuth),\n         _cmk = isnotnull(properties.encryption.keyVaultProperties),\n         _mi  = tostring(identity.type),\n         _pe  = coalesce(array_length(todynamic(tostring(properties.privateEndpointConnections))), 0),\n         _rob = tostring(properties.restrictOutboundNetworkAccess),\n         _nda = tostring(properties.networkAcls.defaultAction)\n| extend Risk = toint(iif(_pna =~ 'Enabled',1,0))\n              + toint(iif(_dla == true,0,1))\n              + toint(iif(_cmk,0,1))\n              + toint(iif(isempty(_mi) or _mi =~ 'None',1,0))\n              + toint(iif(_pe > 0,0,1))\n              + toint(iif(_nda =~ 'Deny',0,1))\n| project\n    Name = name,\n    Kind = tostring(kind),\n    PublicAccess  = iif(_pna =~ 'Disabled', strcat('🟢 ', _pna), iif(isempty(_pna), '⚪ (not set)', strcat('🔴 ', _pna))),\n    LocalAuth     = iif(_dla == true, '🟢 Keys disabled', '🔴 Keys enabled'),\n    CMK           = iif(_cmk, '🟢 Yes', '🟡 No (platform key)'),\n    ManagedId     = iif(isempty(_mi) or _mi =~ 'None', '🔴 None', strcat('🟢 ', _mi)),\n    PrivateEP     = _pe,\n    NetworkAcls   = case(_nda =~ 'Deny', '🟢 Deny', _nda =~ 'Allow', '🔴 Allow', '🟡 (not set)'),\n    RestrictOut   = case(_rob =~ 'Enabled', '🟢 Enabled', _rob =~ 'Disabled', '🟡 Disabled', '⚪ (not set)'),\n    Risk,\n    ResourceGroup = resourceGroup,\n    ResourceId    = id\n| order by Risk desc, Name asc",
+        "size": 0,
+        "title": "AI / Cognitive Services account security posture",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "PrivateEP",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "Risk",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  },
+                  {
+                    "operator": "<=",
+                    "thresholdValue": "2",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Risk",
+              "sortOrder": 2
+            }
+          ]
+        }
+      },
+      "name": "security-cogsvc",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "security"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.machinelearningservices/workspaces'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _pna = tostring(properties.publicNetworkAccess),\n         _hbi = tobool(properties.hbiWorkspace),\n         _mi  = tostring(identity.type),\n         _cmk = isnotnull(properties.encryption.keyVaultProperties),\n         _iso = tostring(properties.managedNetwork.isolationMode)\n| extend Risk = toint(iif(_pna =~ 'Enabled',1,0))\n              + toint(iif(_hbi == true,0,1))\n              + toint(iif(_cmk,0,1))\n              + toint(iif(isempty(_mi) or _mi =~ 'None',1,0))\n              + toint(iif(_iso =~ 'AllowOnlyApprovedOutbound',0,1))\n| project\n    Name = name,\n    Kind = tostring(kind),\n    PublicAccess = iif(_pna =~ 'Disabled', strcat('🟢 ', _pna), iif(isempty(_pna), '⚪ (not set)', strcat('🔴 ', _pna))),\n    HBI          = iif(_hbi == true, '🟢 Yes (HBI)', '🟡 No'),\n    CMK          = iif(_cmk, '🟢 Yes', '🟡 No (platform key)'),\n    ManagedId    = iif(isempty(_mi) or _mi =~ 'None', '🔴 None', strcat('🟢 ', _mi)),\n    NetworkIso   = case(\n        _iso =~ 'AllowOnlyApprovedOutbound', '🟢 AllowOnlyApprovedOutbound',\n        _iso =~ 'AllowInternetOutbound',     '🟡 AllowInternetOutbound',\n        _iso =~ 'Disabled',                  '🔴 Disabled',\n        isempty(_iso),                       '🔴 (none — managed VNet not configured)',\n        strcat('⚪ ', _iso)),\n    Risk,\n    ResourceGroup = resourceGroup,\n    ResourceId    = id\n| order by Risk desc, Name asc",
+        "size": 0,
+        "title": "Azure ML / AI Foundry workspace security posture",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Risk",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  },
+                  {
+                    "operator": "<=",
+                    "thresholdValue": "2",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Risk",
+              "sortOrder": 2
+            }
+          ]
+        }
+      },
+      "name": "security-ml",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "security"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.search/searchservices'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _pna  = tostring(properties.publicNetworkAccess),\n         _dla  = tobool(properties.disableLocalAuth),\n         _cmk  = tostring(properties.encryptionWithCmk.enforcement),\n         _auth = properties.authOptions\n| extend _authMode = case(\n    isnotnull(_auth.aadOrApiKey),  'aadOrApiKey',\n    isnotnull(_auth.aad),          'aad',\n    isnotnull(_auth.apiKeyOnly),   'apiKeyOnly',\n    _dla == true,                  'aad (local auth disabled)',\n    'apiKeyOnly')\n| extend Risk = toint(iif(_pna =~ 'Enabled',1,0))\n              + toint(iif(_dla == true,0,1))\n              + toint(iif(_cmk =~ 'Enabled',0,1))\n              + toint(iif(_authMode =~ 'apiKeyOnly',1,0))\n| project\n    Name = name,\n    SKU  = tostring(sku.name),\n    PublicAccess = iif(_pna =~ 'Disabled', strcat('🟢 ', _pna), iif(isempty(_pna), '⚪ (not set)', strcat('🔴 ', _pna))),\n    LocalAuth    = iif(_dla == true, '🟢 Keys disabled', '🔴 Keys enabled'),\n    AuthMode     = case(\n        _authMode startswith 'aad ',          strcat('🟢 ', _authMode),\n        _authMode =~ 'aad',                   '🟢 aad (Entra-only)',\n        _authMode =~ 'aadOrApiKey',           '🟡 aadOrApiKey (mixed)',\n        _authMode =~ 'apiKeyOnly',            '🔴 apiKeyOnly',\n        strcat('⚪ ', _authMode)),\n    CMKEnforcement = case(\n        _cmk =~ 'Enabled',   '🟢 Enabled',\n        _cmk =~ 'Disabled',  '🔴 Disabled',\n        _cmk =~ 'Unspecified','🟡 Unspecified',\n        '⚪ (not set)'),\n    Risk,\n    ResourceGroup = resourceGroup,\n    ResourceId    = id\n| order by Risk desc, Name asc",
+        "size": 0,
+        "title": "AI Search security posture",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Risk",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  },
+                  {
+                    "operator": "<=",
+                    "thresholdValue": "2",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Risk",
+              "sortOrder": 2
+            }
+          ]
+        },
+        "noDataMessage": "No AI Search services found in this scope. Provision at least one (Basic+ SKU) to evaluate AI Search security posture."
+      },
+      "name": "security-search",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "security"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Coverage: AI resources vs Private Endpoint connections targeting them\nresources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n| project AIResourceId = tolower(id), Name = name, Type = type\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.network/privateendpoints'\n    | mv-expand conn = properties.privateLinkServiceConnections\n    | extend TargetId = tolower(tostring(conn.properties.privateLinkServiceId))\n    | where TargetId has '/providers/microsoft.cognitiveservices/' or TargetId has '/providers/microsoft.machinelearningservices/' or TargetId has '/providers/microsoft.search/'\n    | project AIResourceId = TargetId, PrivateEndpoint = name, PE_RG = resourceGroup, PE_Loc = location, PE_Id = id\n) on AIResourceId\n| extend Status = iif(isempty(PrivateEndpoint), '🔴 No private endpoint', strcat('🟢 ', PrivateEndpoint))\n| project\n    AIResource     = Name,\n    Status,\n    PrivateEndpoint = iif(isempty(PrivateEndpoint), '—', PrivateEndpoint),\n    PE_ResourceGroup = iif(isempty(PE_RG), '—', PE_RG),\n    PE_Location    = iif(isempty(PE_Loc), '—', PE_Loc),\n    AIResourceType = Type,\n    ResourceId     = iif(isempty(PE_Id), AIResourceId, PE_Id)\n| order by Status asc, AIResource asc",
+        "size": 0,
+        "title": "Private Endpoints attached to AI resources",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "security-pe",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "security"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🔄 Reliability\n\n**Stakeholder takeaway:** are production AI workloads on SLA-backed SKUs, in zone-capable regions, and (for AI Search) with enough replicas for the read/write SLA?\n\n**What 'good' looks like:**\n- 🟢 **Cognitive / OpenAI**: SKU = `S0` or higher (F0 has no SLA), region supports **availability zones**\n- 🟢 **AI Search**: SKU ≥ `standard` (basic/free can't use AZ), **Replicas ≥ 2** for read-SLA, **Replicas ≥ 3** for write-SLA, **Partitions ≥ 2** for index resilience\n- 🟢 **ML Online Endpoints**: `Succeeded` provisioning, non-key auth, private network\n\nSort each grid by **Risk ⬇** to find the worst offenders."
+      },
+      "name": "reliability-header",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "reliability"
+      }
+    },
+    {
+      "type": 3,
+      "name": "reliability-posture",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces/onlineendpoints')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _sku = tostring(sku.name),\n         _loc = tolower(location),\n         _replicas = toint(properties.replicaCount),\n         _isSearch = type =~ 'microsoft.search/searchservices',\n         _isCog = type =~ 'microsoft.cognitiveservices/accounts',\n         _isEndpoint = type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints',\n         _provState = tostring(properties.provisioningState)\n| summarize\n    Total       = count(),\n    SLABacked   = countif((_isCog and _sku !~ 'F0' and isnotempty(_sku)) or (_isSearch and _sku !~ 'free' and _sku !~ 'basic') or (_isEndpoint and _provState =~ 'Succeeded')),\n    ZoneCapable = countif(_loc in ('eastus','eastus2','westus2','westus3','westeurope','northeurope','francecentral','swedencentral','southcentralus','southeastasia','japaneast','australiaeast','uksouth','canadacentral','germanywestcentral','koreacentral','brazilsouth','centralindia')),\n    SearchReadSLA  = countif(_isSearch and _replicas >= 2),\n    SearchWriteSLA = countif(_isSearch and _replicas >= 3),\n    SearchTotal    = countif(_isSearch),\n    CogTotal       = countif(_isCog),\n    CogPaid        = countif(_isCog and _sku !~ 'F0' and isnotempty(_sku))\n| project KPIs = pack(\n    '🪙 Production SKU (SLA-backed)', SLABacked,\n    '🌐 In zone-capable region',      ZoneCapable,\n    '📚 AI Search read-SLA (≥2 reps)', SearchReadSLA,\n    '✍️ AI Search write-SLA (≥3 reps)', SearchWriteSLA,\n    '🤖 Cognitive on paid tier',      CogPaid),\n  Denominators = pack(\n    '🪙 Production SKU (SLA-backed)', Total,\n    '🌐 In zone-capable region',      Total,\n    '📚 AI Search read-SLA (≥2 reps)', SearchTotal,\n    '✍️ AI Search write-SLA (≥3 reps)', SearchTotal,\n    '🤖 Cognitive on paid tier',      CogTotal)\n| mv-expand kv = KPIs\n| extend KPI = tostring(bag_keys(kv)[0])\n| extend Value = toint(kv[KPI]), Total = toint(Denominators[KPI])\n| extend Score = strcat(Value, ' / ', Total),\n         Status = case(Total == 0, '⚪', Value == Total, '🟢', Value == 0, '🔴', '🟡')\n| project KPI, Status, Score\n| order by KPI asc",
+        "size": 3,
+        "title": "Reliability posture across all AI resources",
+        "queryType": 0,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "KPI",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Status",
+            "formatter": 1
+          },
+          "subtitleContent": {
+            "columnMatch": "Score",
+            "formatter": 1
+          },
+          "showBorder": true,
+          "size": "auto"
+        }
+      },
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "reliability"
+      }
+    },
+    {
+      "type": 1,
+      "name": "reliability-risk-legend",
+      "content": {
+        "json": "### 📊 Risk score legend (Reliability)\n\nEach row's **Risk** column = number of failed checks (lower is better). Colors: 🟢 **0** · 🟡 **1–2** · 🔴 **3+**.\n\n| Check (one point each when failing) | 🤖 Cognitive / OpenAI | 🔍 AI Search | 🧪 ML Online Endpoint |\n|---|:-:|:-:|:-:|\n| SKU is `F0` / `free` / `basic` (no SLA) | ✅ | ✅ | — |\n| Region does **not** support availability zones | ✅ | ✅ | ✅ |\n| Replicas < 2 (no read SLA) | — | ✅ | — |\n| Replicas < 3 (no write SLA) | — | ✅ | — |\n| Partitions < 2 (single point of index failure) | — | ✅ | — |\n| Provisioning state ≠ `Succeeded` | — | — | ✅ |\n| Public network access = `Enabled` | — | — | ✅ |\n| Auth mode uses **Key** (vs AAD/AMLToken) | — | — | ✅ |\n\n**Max possible Risk:** Cognitive = 2 · AI Search = 5 · ML Endpoint = 4."
+      },
+      "customWidth": "100",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "reliability"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _sku = tostring(sku.name), _loc = tolower(location)\n| extend _isFree = (_sku =~ 'F0'),\n         _zone = (_loc in ('eastus','eastus2','westus2','westus3','westeurope','northeurope','francecentral','swedencentral','southcentralus','southeastasia','japaneast','australiaeast','uksouth','canadacentral','germanywestcentral','koreacentral','brazilsouth','centralindia'))\n| extend Risk = toint(iif(_isFree, 1, 0))\n              + toint(iif(_zone, 0, 1))\n              + toint(iif(isempty(_sku), 1, 0))\n| project\n    Name = name,\n    Kind = tostring(kind),\n    SKU  = case(isempty(_sku), '⚪ (unknown)', _sku =~ 'F0', '🔴 F0 (free, no SLA)', strcat('🟢 ', _sku)),\n    Region = iif(_zone, strcat('🟢 ', location), strcat('🟡 ', location, ' (no AZ)')),\n    Risk,\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| order by Risk desc, Name asc",
+        "size": 0,
+        "title": "AI / Cognitive accounts — SKU & tier",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Risk",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  },
+                  {
+                    "operator": "<=",
+                    "thresholdValue": "2",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Risk",
+              "sortOrder": 2
+            }
+          ]
+        }
+      },
+      "name": "reliability-cogsvc",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "reliability"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.search/searchservices'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _sku = tostring(sku.name),\n         _loc = tolower(location),\n         _r = toint(properties.replicaCount),\n         _p = toint(properties.partitionCount)\n| extend _zone = (_loc in ('eastus','eastus2','westus2','westus3','westeurope','northeurope','francecentral','swedencentral','southcentralus','southeastasia','japaneast','australiaeast','uksouth','canadacentral','germanywestcentral','koreacentral','brazilsouth','centralindia')),\n         _nonProd = (_sku =~ 'free' or _sku =~ 'basic')\n| extend Risk = toint(iif(_nonProd, 1, 0))\n              + toint(iif(_zone, 0, 1))\n              + toint(iif(_r < 2, 1, 0))\n              + toint(iif(_r < 3, 1, 0))\n              + toint(iif(_p < 2, 1, 0))\n| project\n    Name = name,\n    SKU = case(_sku =~ 'free', '🔴 free (no SLA)', _sku =~ 'basic', '🟡 basic (no AZ)', strcat('🟢 ', _sku)),\n    Replicas   = _r,\n    Partitions = _p,\n    ReadSLA  = iif(_r >= 2, '🟢 Yes (≥2 replicas)', '🔴 No (<2 replicas)'),\n    WriteSLA = iif(_r >= 3, '🟢 Yes (≥3 replicas)', '🟡 No (<3 replicas)'),\n    Region   = iif(_zone, strcat('🟢 ', location), strcat('🟡 ', location, ' (no AZ)')),\n    Risk,\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| order by Risk desc, Name asc",
+        "size": 0,
+        "title": "AI Search — replicas & SLA risk",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Replicas",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "<",
+                    "thresholdValue": "2",
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  },
+                  {
+                    "operator": "<",
+                    "thresholdValue": "3",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "Partitions",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "<",
+                    "thresholdValue": "2",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "Risk",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  },
+                  {
+                    "operator": "<=",
+                    "thresholdValue": "2",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Risk",
+              "sortOrder": 2
+            }
+          ]
+        },
+        "noDataMessage": "No AI Search services found. SLA / replica checks will activate once an AI Search service is deployed."
+      },
+      "name": "reliability-search",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "reliability"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _ps  = tostring(properties.provisioningState),\n         _pna = tostring(properties.publicNetworkAccess),\n         _am  = tostring(properties.authMode),\n         _loc = tolower(location)\n| extend _zone = (_loc in ('eastus','eastus2','westus2','westus3','westeurope','northeurope','francecentral','swedencentral','southcentralus','southeastasia','japaneast','australiaeast','uksouth','canadacentral','germanywestcentral','koreacentral','brazilsouth','centralindia'))\n| extend Risk = toint(iif(_ps =~ 'Succeeded', 0, 1))\n              + toint(iif(_pna =~ 'Disabled', 0, 1))\n              + toint(iif(_am has 'Key', 1, 0))\n              + toint(iif(_zone, 0, 1))\n| project\n    Workspace = tostring(split(id,'/')[8]),\n    Endpoint  = name,\n    State     = case(_ps =~ 'Succeeded', '🟢 Succeeded', _ps =~ 'Failed', '🔴 Failed', _ps =~ 'Canceled', '🔴 Canceled', strcat('🟡 ', _ps)),\n    PublicAccess = iif(_pna =~ 'Disabled', strcat('🟢 ', _pna), iif(isempty(_pna), '⚪ (not set)', strcat('🔴 ', _pna))),\n    AuthMode = case(_am has 'AAD', strcat('🟢 ', _am), _am has 'AMLToken', strcat('🟢 ', _am), _am has 'Key', strcat('🔴 ', _am), strcat('⚪ ', _am)),\n    Region   = iif(_zone, strcat('🟢 ', location), strcat('🟡 ', location, ' (no AZ)')),\n    Risk,\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| union (\n    // empty-state row when no online endpoints exist\n    resources\n    | where type =~ 'microsoft.machinelearningservices/workspaces'\n    | summarize n = count()\n    | extend joinKey = 1\n    | join kind=leftouter (\n        resources\n        | where type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints'\n        | summarize ep = count()\n        | extend joinKey = 1\n      ) on joinKey\n    | where coalesce(ep, 0) == 0\n    | project\n        Workspace = '—',\n        Endpoint  = 'ℹ️ No ML online endpoints deployed in this scope',\n        State     = '—',\n        PublicAccess = '—',\n        AuthMode  = '—',\n        Region    = '—',\n        Risk      = 0,\n        ResourceGroup = '—',\n        ResourceId = ''\n)\n| order by Risk desc, Endpoint asc",
+        "size": 0,
+        "title": "ML / Foundry online endpoints — availability & auth",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Risk",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  },
+                  {
+                    "operator": "<=",
+                    "thresholdValue": "2",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true
+        },
+        "noDataMessage": "No ML online endpoints found. Real-time inference endpoint metrics will appear after the first endpoint is created."
+      },
+      "name": "perf-endpoints",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "reliability"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 💰 Cost\n\n**Stakeholder takeaway:** where is AI spend large or wasted? Focus on idle workspaces (hidden Storage/KeyVault/ACR charges), over-provisioned AI Search units, and Cognitive accounts on free / expensive PTU SKUs without traffic.\n\n**What 'good' looks like:**\n- 🟢 **AI Search**: `Replicas × Partitions` matches workload need (>4 units = review; ≥12 = expensive)\n- 🟢 **ML / Foundry workspaces**: ≥1 compute or endpoint attached (idle = orphan Storage/KV/ACR charges)\n- 🟢 **Cognitive accounts**: on `S0` (PAYG) — no idle cost; `F0` is fine for dev only, never prod\n\nEach row's **Waste** column counts cost-impacting findings. Sort by Waste ⬇ to triage."
+      },
+      "name": "cost-header",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "cost"
+      }
+    },
+    {
+      "type": 3,
+      "name": "cost-posture",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _sku = tostring(sku.name),\n         _isSearch = type =~ 'microsoft.search/searchservices',\n         _isCog = type =~ 'microsoft.cognitiveservices/accounts',\n         _isML = type =~ 'microsoft.machinelearningservices/workspaces',\n         _units = iif(type =~ 'microsoft.search/searchservices',\n                      coalesce(toint(properties.replicaCount),1) * coalesce(toint(properties.partitionCount),1),\n                      0)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints' or type =~ 'microsoft.machinelearningservices/workspaces/computes'\n    | extend Parent = tostring(split(id,'/')[8])\n    | summarize ChildCount = count() by Parent\n  ) on $left.name == $right.Parent\n| extend _idleML = (_isML and coalesce(ChildCount,0) == 0)\n| summarize\n    TotalSearchUnits = sum(_units),\n    SearchOverProv   = countif(_isSearch and _units >= 4),\n    SearchExpensive  = countif(_isSearch and _units >= 12),\n    SearchTotal      = countif(_isSearch),\n    IdleML           = countif(_idleML),\n    MLTotal          = countif(_isML),\n    CogFree          = countif(_isCog and _sku =~ 'F0'),\n    CogTotal         = countif(_isCog)\n| extend\n    r1 = bag_pack('Sort','1','KPI','🛒 Total AI Search billable units',\n                  'Status', case(SearchTotal == 0, '⚪', TotalSearchUnits >= 12, '🔴', TotalSearchUnits >= 4, '🟡', '🟢'),\n                  'Score', strcat(TotalSearchUnits, ' units across ', SearchTotal, ' svc')),\n    r2 = bag_pack('Sort','2','KPI','💤 Idle ML / Foundry workspaces',\n                  'Status', case(MLTotal == 0, '⚪', IdleML == 0, '🟢', IdleML == MLTotal, '🔴', '🟡'),\n                  'Score', strcat(IdleML, ' / ', MLTotal)),\n    r3 = bag_pack('Sort','3','KPI','⚠️ AI Search units ≥ 4 (review)',\n                  'Status', case(SearchTotal == 0, '⚪', SearchOverProv == 0, '🟢', '🟡'),\n                  'Score', strcat(SearchOverProv, ' / ', SearchTotal)),\n    r4 = bag_pack('Sort','4','KPI','🔥 AI Search units ≥ 12 (expensive)',\n                  'Status', case(SearchTotal == 0, '⚪', SearchExpensive == 0, '🟢', '🔴'),\n                  'Score', strcat(SearchExpensive, ' / ', SearchTotal)),\n    r5 = bag_pack('Sort','5','KPI','🆓 Cognitive accounts on F0',\n                  'Status', case(CogTotal == 0, '⚪', CogFree == 0, '🟢', '🟡'),\n                  'Score', strcat(CogFree, ' / ', CogTotal))\n| project bags = pack_array(r1, r2, r3, r4, r5)\n| mv-expand bag = bags\n| project\n    Sort = toint(bag.Sort),\n    KPI = tostring(bag.KPI),\n    Status = tostring(bag.Status),\n    Score = tostring(bag.Score)\n| order by Sort asc\n| project-away Sort",
+        "size": 3,
+        "title": "Cost posture across all AI resources",
+        "queryType": 0,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "KPI",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Status",
+            "formatter": 1
+          },
+          "subtitleContent": {
+            "columnMatch": "Score",
+            "formatter": 1
+          },
+          "showBorder": true,
+          "size": "auto"
+        }
+      },
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "cost"
+      }
+    },
+    {
+      "type": 1,
+      "name": "cost-waste-legend",
+      "content": {
+        "json": "### 📊 Waste score legend (Cost)\n\nEach row's **Waste** column = number of cost-impacting findings. Colors: 🟢 **0** · 🟡 **1** · 🔴 **2+**.\n\n| Check (one point each when failing) | 🤖 Cognitive | 🔍 AI Search | 🧪 ML Workspace |\n|---|:-:|:-:|:-:|\n| SKU = `F0` (free, no prod) | ✅ | — | — |\n| Billable units (R×P) ≥ 4 (review need) | — | ✅ | — |\n| Billable units (R×P) ≥ 12 (expensive) | — | ✅ | — |\n| Replicas ≥ 4 (high read scale) | — | ✅ | — |\n| Partitions ≥ 4 (large index) | — | ✅ | — |\n| No endpoints + no computes attached | — | — | ✅ |\n| Created > 90 days ago + idle | — | — | ✅ |\n\n💡 **Hidden cost note:** every ML workspace also creates a Storage Account, Key Vault, App Insights, and (optionally) ACR. An idle workspace still incurs ~$5–15/month from those dependencies even when no compute is attached."
+      },
+      "customWidth": "100",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "cost"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend SKU = tostring(sku.name), Kind = tostring(kind)\n| summarize Accounts = count() by Kind, SKU\n| extend SKULabel = case(\n    SKU =~ 'F0', '🆓 F0 (free, dev only)',\n    SKU =~ 'S0', '🟢 S0 (PAYG)',\n    isempty(SKU), '⚪ (unknown)',\n    strcat('🔵 ', SKU))\n| project Kind, SKU = SKULabel, Accounts\n| order by Accounts desc, Kind asc",
+        "size": 0,
+        "title": "AI account SKU mix by kind",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "piechart",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Accounts",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": "blue"
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "cost-skumix",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "cost"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.search/searchservices'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _sku = tostring(sku.name),\n         _r = coalesce(toint(properties.replicaCount), 1),\n         _p = coalesce(toint(properties.partitionCount), 1)\n| extend _units = _r * _p\n| extend Waste = toint(iif(_units >= 4, 1, 0))\n              + toint(iif(_units >= 12, 1, 0))\n              + toint(iif(_r >= 4, 1, 0))\n              + toint(iif(_p >= 4, 1, 0))\n| project\n    Name = name,\n    SKU  = case(_sku =~ 'free', '🆓 free', _sku =~ 'basic', '🔵 basic', strcat('🟢 ', _sku)),\n    Replicas      = _r,\n    Partitions    = _p,\n    BillableUnits = _units,\n    SpendTier = case(\n        _units >= 12, '🔴 High (≥12 units)',\n        _units >= 4,  '🟡 Medium (4-11 units)',\n        '🟢 Low (<4 units)'),\n    Waste,\n    Region = location,\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| order by Waste desc, BillableUnits desc, Name asc",
+        "size": 0,
+        "title": "AI Search — billable units (Replicas × Partitions)",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Replicas",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": ">=",
+                    "thresholdValue": "4",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "Partitions",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": ">=",
+                    "thresholdValue": "4",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "BillableUnits",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": ">=",
+                    "thresholdValue": "12",
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  },
+                  {
+                    "operator": ">=",
+                    "thresholdValue": "4",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "Waste",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "1",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Waste",
+              "sortOrder": 2
+            }
+          ]
+        },
+        "noDataMessage": "No AI Search services found. Billable search-unit analysis (replicas x partitions) will appear once a service is provisioned."
+      },
+      "name": "cost-searchunits",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "cost"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.machinelearningservices/workspaces'\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints' or type =~ 'microsoft.machinelearningservices/workspaces/computes'\n    | extend Parent = tostring(split(id,'/')[8])\n    | summarize ChildCount = count() by Parent\n  ) on $left.name == $right.Parent\n| extend _children = coalesce(ChildCount, 0)\n| extend Waste = toint(iif(_children == 0, 1, 0))\n| project\n    Name = name,\n    Kind = tostring(kind),\n    Children = _children,\n    Status = iif(_children == 0,\n                 '🔴 Idle — no endpoints/computes (~$5-15/mo orphan cost)',\n                 strcat('🟢 Active (', _children, ' child resource(s))')),\n    Waste,\n    Region = location,\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| order by Waste desc, Name asc",
+        "size": 0,
+        "title": "ML / AI Foundry workspaces — possibly idle (hidden cost)",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Children",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "Waste",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Waste",
+              "sortOrder": 2
+            }
+          ]
+        },
+        "noDataMessage": "No ML / AI Foundry workspaces found, or all workspaces have active children. Add a workspace or shut down endpoints to see idle-workspace findings."
+      },
+      "name": "cost-idleml",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "cost"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## ⚙️ Operational Excellence\n\n**Stakeholder takeaway:** governance basics - tagging consistency, resource locks, and how AI workloads spread across subscriptions. Drives operating model and chargeback."
+      },
+      "name": "ops-header",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "ops"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices','microsoft.cognitiveservices/accounts/projects')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| extend _required = split('{RequiredTagKey}', ','),\n         _present = bag_keys(tags)\n| extend _missing = set_difference(_required, _present)\n| extend _missingCount = array_length(_missing),\n         _requiredCount = array_length(_required),\n         _tagCount = coalesce(array_length(bag_keys(tags)), 0)\n| extend Compliance = iif(_requiredCount == 0, 100, toint(round(100.0 * (_requiredCount - _missingCount) / _requiredCount)))\n| project\n    Name = name,\n    Type = type,\n    RequiredTags = case(\n        _requiredCount == 0,            '⚪ (none configured)',\n        _missingCount == 0,             strcat('🟢 All present (', _requiredCount, ' / ', _requiredCount, ')'),\n        _missingCount == _requiredCount,strcat('🔴 None present (0 / ', _requiredCount, ')'),\n        strcat('🟡 Missing: ', strcat_array(_missing, ', '))),\n    Compliance,\n    TagCount = _tagCount,\n    TagsRaw = tostring(tags),\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| order by Compliance asc, Name asc",
+        "size": 0,
+        "title": "Tag compliance (required tag(s): {RequiredTagKey})",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Compliance",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "100",
+                    "representation": "success",
+                    "text": "🟢 {0}%"
+                  },
+                  {
+                    "operator": ">=",
+                    "thresholdValue": "50",
+                    "representation": "warning",
+                    "text": "🟡 {0}%"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "critical",
+                    "text": "🔴 {0}%"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "TagCount",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  },
+                  {
+                    "operator": "<",
+                    "thresholdValue": "3",
+                    "representation": "warning",
+                    "text": "🟡 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Compliance",
+              "sortOrder": 1
+            }
+          ]
+        }
+      },
+      "name": "ops-tags",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "ops"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices','microsoft.cognitiveservices/accounts/projects')\n| where '{NameFilter}' == '' or name contains '{NameFilter}'\n| project id, name, type, subscriptionId, resourceGroup\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.authorization/locks'\n    | extend Scope = tostring(split(id,'/providers/Microsoft.Authorization/locks/')[0])\n    | summarize LockCount = count(), LockNames = make_set(name) by Scope\n  ) on $left.id == $right.Scope\n| extend _locks = coalesce(LockCount, 0)\n| project\n    Name = name,\n    Type = type,\n    Locks = _locks,\n    Status = iif(_locks == 0, '🔴 No lock (deletable)', strcat('🟢 Locked (', _locks, ')')),\n    LockNames = iif(_locks == 0, '—', tostring(LockNames)),\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| order by Locks asc, Name asc",
+        "size": 0,
+        "title": "Resource locks on AI resources (CanNotDelete recommended for prod)",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Locks",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "0",
+                    "representation": "critical",
+                    "text": "🔴 {0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "🟢 {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Locks",
+              "sortOrder": 1
+            }
+          ]
+        }
+      },
+      "name": "ops-locks",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "ops"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| project SubscriptionId=subscriptionId, SubscriptionName=name\n| join kind=inner (\n    resources\n    | where type in~ ('microsoft.cognitiveservices/accounts','microsoft.machinelearningservices/workspaces','microsoft.search/searchservices')\n    | summarize ResourceCount=count() by subscriptionId\n  ) on $left.SubscriptionId == $right.subscriptionId\n| project SubscriptionName, SubscriptionId, AIResources=ResourceCount\n| order by AIResources desc",
+        "size": 0,
+        "title": "AI footprint per subscription",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "AIResources",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": "blue"
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "ops-subs",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "ops"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "> **Note on Diagnostic Settings:** ARG does not expose `Microsoft.Insights/diagnosticSettings` for AI resources reliably. For a per-resource diagnostic check, open the resource link and inspect **Monitoring → Diagnostic settings**. A future version of this workbook can call the ARM REST API per resource if needed."
+      },
+      "name": "ops-note",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "ops"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🕒 Model Lifecycle & Account Inventory\n\n**Stakeholder takeaway:** an inventory of every Cognitive / Foundry account in the selected subscription scope **across all regions**, plus the Foundry projects inside them. To inspect **live model deployments** for a specific account, click its row in the **accounts inventory** grid below - the deployments grid drills into the live `…/accounts/{name}/deployments` ARM REST endpoint for the clicked account. *(Azure Resource Graph does not index `microsoft.cognitiveservices/accounts/deployments`, so live deployment data is fetched per-account on demand.)*"
+      },
+      "name": "models-header",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "models"
+      }
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "selectedaccount-param",
+            "version": "KqlParameterItem/1.0",
+            "name": "SelectedAccount",
+            "type": 1,
+            "isRequired": false,
+            "value": "",
+            "hidden": true,
+            "isHiddenWhenLocked": true
+          },
+          {
+            "id": "selectedaccount-sub-param",
+            "version": "KqlParameterItem/1.0",
+            "name": "SelectedAccountSub",
+            "type": 1,
+            "isRequired": false,
+            "value": "",
+            "hidden": true,
+            "isHiddenWhenLocked": true
+          },
+          {
+            "id": "selectedaccount-location-param",
+            "version": "KqlParameterItem/1.0",
+            "name": "SelectedAccountLocation",
+            "type": 1,
+            "isRequired": false,
+            "value": "",
+            "hidden": true,
+            "isHiddenWhenLocked": true
+          }
+        ],
+        "style": "pills",
+        "queryType": 0
+      },
+      "name": "models-params",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "models"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n| where ('{NameFilter}' == '' or name contains '{NameFilter}')\n| extend _pna = tostring(properties.publicNetworkAccess),\n         _mi  = coalesce(tostring(identity.type), 'None'),\n         _dla = tobool(properties.disableLocalAuth),\n         _st  = tostring(properties.provisioningState)\n| project\n    Account = name,\n    Region  = location,\n    Kind    = kind,\n    SKU     = tostring(sku.name),\n    PublicAccess = iif(_pna =~ 'Disabled', strcat('🟢 ', _pna), iif(isempty(_pna), '⚪ (not set)', strcat('🔴 ', _pna))),\n    Identity     = iif(isempty(_mi) or _mi =~ 'None', '🔴 None', strcat('🟢 ', _mi)),\n    LocalAuth    = iif(_dla == true, '🟢 Keys disabled', '🔴 Keys enabled'),\n    State        = case(_st =~ 'Succeeded', '🟢 Succeeded', _st =~ 'Failed', '🔴 Failed', _st =~ 'Canceled', '🔴 Canceled', strcat('🟡 ', _st)),\n    Endpoint     = tostring(properties.endpoint),\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId,\n    ResourceId   = id\n| order by Region asc, Account asc",
+        "size": 0,
+        "title": "Cognitive / Foundry accounts (all regions). Click a row to drill into its live deployments below.",
+        "showExportToExcel": true,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "exportedParameters": [
+          {
+            "fieldName": "ResourceId",
+            "parameterName": "SelectedAccount"
+          },
+          {
+            "fieldName": "SubscriptionId",
+            "parameterName": "SelectedAccountSub"
+          },
+          {
+            "fieldName": "Region",
+            "parameterName": "SelectedAccountLocation"
+          }
+        ],
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Account",
+              "formatter": 1
+            },
+            {
+              "columnMatch": "SubscriptionId",
+              "formatter": 5
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true
+        },
+        "noDataMessage": "No Cognitive / Foundry accounts found in the selected subscription scope."
+      },
+      "name": "models-catalog",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "models"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts/projects'\n| extend ParentAccount = tostring(split(tostring(split(id,'/projects/')[0]), '/accounts/')[1])\n| extend _st = tostring(properties.provisioningState)\n| project\n    Project = name,\n    ParentAccount,\n    Region = location,\n    State  = case(_st =~ 'Succeeded', '🟢 Succeeded', _st =~ 'Failed', '🔴 Failed', _st =~ 'Canceled', '🔴 Canceled', strcat('🟡 ', _st)),\n    ResourceGroup = resourceGroup,\n    ResourceId = id\n| order by ParentAccount asc, Project asc",
+        "size": 0,
+        "title": "Foundry projects across all accounts",
+        "noDataMessage": "No Foundry projects found in the selected subscription scope.",
+        "showExportToExcel": true,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Project",
+              "formatter": 1
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "models-deprecated",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "models"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### 🚀 Live deployments for the selected account\n\nClick any row in the **accounts inventory** above to populate the grid below with live model deployments from that account. This calls `…/accounts/{name}/deployments` directly via the ARM REST API on every refresh - no Azure Resource Graph caching, no model-version staleness."
+      },
+      "name": "deployments-header",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "models"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "> :information_source: **No account selected yet.** Click any row in the **accounts inventory** above to populate this grid with that account's live model deployments.",
+        "style": "info"
+      },
+      "name": "deployments-hint",
+      "conditionalVisibilities": [
+        {
+          "parameterName": "SelectedTab",
+          "comparison": "isEqualTo",
+          "value": "models"
+        },
+        {
+          "parameterName": "SelectedAccount",
+          "comparison": "isEqualTo",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "**Model lifecycle key** &nbsp;&nbsp; 🟢 Current / recommended &nbsp;&nbsp; 🟠 Aging — plan migration &nbsp;&nbsp; 🔴 Retired &nbsp;&nbsp; ℹ️ Unclassified (new / preview / third-party — no risk asserted) &nbsp;&nbsp; *See* [Azure OpenAI model retirement schedule](https://learn.microsoft.com/azure/ai-services/openai/concepts/model-retirements)",
+        "style": "info"
+      },
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "models"
+      },
+      "name": "deployments-legend"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "{\"version\": \"ARMEndpoint/1.0\", \"data\": null, \"headers\": [], \"method\": \"GET\", \"path\": \"{SelectedAccount}/deployments\", \"urlParams\": [{\"key\": \"api-version\", \"value\": \"2024-10-01\"}], \"batchDisabled\": false, \"transformers\": [{\"type\": \"jsonpath\", \"settings\": {\"tablePath\": \"$.value\", \"columns\": [{\"path\": \"$.name\", \"columnid\": \"Deployment\"}, {\"path\": \"$.properties.model.name\", \"columnid\": \"Model\"}, {\"path\": \"$.properties.model.version\", \"columnid\": \"Version\"}, {\"path\": \"$.properties.model.format\", \"columnid\": \"Format\"}, {\"path\": \"$.sku.name\", \"columnid\": \"SKU\"}, {\"path\": \"$.sku.capacity\", \"columnid\": \"Capacity\"}, {\"path\": \"$.properties.raiPolicyName\", \"columnid\": \"RAIPolicy\"}, {\"path\": \"$.properties.provisioningState\", \"columnid\": \"ProvisioningState\"}, {\"path\": \"$.id\", \"columnid\": \"ResourceId\"}]}}]}",
+        "size": 0,
+        "title": "Live model deployments — with retirement risk grading",
+        "showExportToExcel": true,
+        "queryType": 12,
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ProvisioningState",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Succeeded",
+                    "representation": "success",
+                    "text": "🟢 Succeeded"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Failed",
+                    "representation": "critical",
+                    "text": "🔴 Failed"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Creating",
+                    "representation": "warning",
+                    "text": "🟡 Creating"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Updating",
+                    "representation": "warning",
+                    "text": "🟡 Updating"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Deleting",
+                    "representation": "warning",
+                    "text": "🟡 Deleting"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "info",
+                    "text": "ℹ️ {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            },
+            {
+              "columnMatch": "Capacity",
+              "formatter": 0
+            },
+            {
+              "columnMatch": "^Model$",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-davinci",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "code-davinci",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-curie",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-babbage",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-ada",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-3.5",
+                    "representation": "3",
+                    "text": "{0} (aging — plan migration)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-embedding-ada",
+                    "representation": "3",
+                    "text": "{0} (aging — plan migration)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-4o",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-4.1",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-4",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "o1",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "o3",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-embedding-3",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-5",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-realtime",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "Phi",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "dall-e-3",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "FLUX",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "model-router",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "dall-e-2",
+                    "representation": "3",
+                    "text": "{0} (aging — plan migration)"
+                  },
+                  {
+                    "operator": "Default",
+                    "representation": "info",
+                    "text": "{0} (unclassified)"
+                  }
+                ]
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "Deployment",
+              "label": "Deployment"
+            },
+            {
+              "columnId": "Model",
+              "label": "Model"
+            },
+            {
+              "columnId": "ModelVersion",
+              "label": "Version"
+            },
+            {
+              "columnId": "Format",
+              "label": "Format"
+            },
+            {
+              "columnId": "SKU",
+              "label": "SKU"
+            },
+            {
+              "columnId": "Capacity",
+              "label": "Capacity (TPM units)"
+            },
+            {
+              "columnId": "RAIPolicy",
+              "label": "RAI policy"
+            },
+            {
+              "columnId": "ProvisioningState",
+              "label": "State"
+            },
+            {
+              "columnId": "ResourceId",
+              "label": "Resource"
+            }
+          ]
+        },
+        "noDataMessage": "No deployments returned. Either the selected account has no model deployments yet, or you lack Reader access on the account."
+      },
+      "name": "deployments-grid",
+      "conditionalVisibility": {
+        "parameterName": "SelectedAccount",
+        "comparison": "isEqualTo",
+        "value": "__never_show_source__"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "{\"version\": \"ARMEndpoint/1.0\", \"data\": null, \"headers\": [], \"method\": \"GET\", \"path\": \"/subscriptions/{SelectedAccountSub}/providers/Microsoft.CognitiveServices/locations/{SelectedAccountLocation}/models\", \"urlParams\": [{\"key\": \"api-version\", \"value\": \"2024-10-01\"}], \"batchDisabled\": false, \"transformers\": [{\"type\": \"jsonpath\", \"settings\": {\"tablePath\": \"$.value\", \"columns\": [{\"path\": \"$.model.format\", \"columnid\": \"Format\"}, {\"path\": \"$.model.name\", \"columnid\": \"Model\"}, {\"path\": \"$.model.version\", \"columnid\": \"Version\"}, {\"path\": \"$.model.lifecycleStatus\", \"columnid\": \"LifecycleStatus\"}, {\"path\": \"$.model.deprecation.inference\", \"columnid\": \"InferenceRetirement\"}, {\"path\": \"$.model.deprecation.fineTune\", \"columnid\": \"FineTuneRetirement\"}, {\"path\": \"$.model.description\", \"columnid\": \"ReplacementGuidance\"}]}}]}",
+        "size": 0,
+        "queryType": 12,
+        "visualization": "table"
+      },
+      "name": "models-source",
+      "conditionalVisibility": {
+        "parameterName": "SelectedAccount",
+        "comparison": "isEqualTo",
+        "value": "__never_show_source__"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"deployments-retirement-merge\",\"mergeType\":\"leftouter\",\"leftTable\":\"deployments-grid\",\"rightTable\":\"models-source\",\"leftColumn\":\"Model\",\"rightColumn\":\"Model\"}],\"projectRename\":[{\"originalName\":\"[deployments-grid].Deployment\",\"mergedName\":\"Deployment\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[deployments-grid].Model\",\"mergedName\":\"Model\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[deployments-grid].Version\",\"mergedName\":\"Version\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[deployments-grid].Format\",\"mergedName\":\"Format\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[deployments-grid].SKU\",\"mergedName\":\"SKU\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[deployments-grid].Capacity\",\"mergedName\":\"Capacity\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[deployments-grid].RAIPolicy\",\"mergedName\":\"RAIPolicy\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[models-source].LifecycleStatus\",\"mergedName\":\"LifecycleStatus\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[models-source].Version\",\"mergedName\":\"CatalogVersion\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[models-source].InferenceRetirement\",\"mergedName\":\"InferenceRetirement\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[models-source].FineTuneRetirement\",\"mergedName\":\"FineTuneRetirement\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[deployments-grid].ProvisioningState\",\"mergedName\":\"ProvisioningState\",\"fromId\":\"deployments-retirement-merge\"},{\"originalName\":\"[deployments-grid].ResourceId\",\"mergedName\":\"ResourceId\",\"fromId\":\"deployments-retirement-merge\"}]}",
+        "size": 0,
+        "title": "Live model deployments — with lifecycle status & retirement dates",
+        "noDataMessage": "No deployments returned, or none of the deployed model names matched the regional catalog. Either the selected account has no deployments yet, or you lack Reader access on the account.",
+        "showExportToExcel": true,
+        "queryType": 7,
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "^ProvisioningState$",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Succeeded",
+                    "representation": "success",
+                    "text": "🟢 Succeeded"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Failed",
+                    "representation": "critical",
+                    "text": "🔴 Failed"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Creating",
+                    "representation": "warning",
+                    "text": "🟡 Creating"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Updating",
+                    "representation": "warning",
+                    "text": "🟡 Updating"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Deleting",
+                    "representation": "warning",
+                    "text": "🟡 Deleting"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "info",
+                    "text": "ℹ️ {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "^ResourceId$",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            },
+            {
+              "columnMatch": "^Capacity$",
+              "formatter": 0
+            },
+            {
+              "columnMatch": "^Model$",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-davinci",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "code-davinci",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-curie",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-babbage",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-ada",
+                    "representation": "4",
+                    "text": "{0} (retired)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-3.5",
+                    "representation": "3",
+                    "text": "{0} (aging — plan migration)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-embedding-ada",
+                    "representation": "3",
+                    "text": "{0} (aging — plan migration)"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-4o",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-4.1",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-4",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "o1",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "o3",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "text-embedding-3",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-5",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "gpt-realtime",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "Phi",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "dall-e-3",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "FLUX",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "model-router",
+                    "representation": "success",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "dall-e-2",
+                    "representation": "3",
+                    "text": "{0} (aging — plan migration)"
+                  },
+                  {
+                    "operator": "Default",
+                    "representation": "info",
+                    "text": "{0} (unclassified)"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "^LifecycleStatus$",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "GenerallyAvailable",
+                    "representation": "success",
+                    "text": "🟢 GA (Azure OpenAI — SLA, dated retirement)"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Stable",
+                    "representation": "success",
+                    "text": "🟢 Stable (open-source / partner — no dated retirement)"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Preview",
+                    "representation": "info",
+                    "text": "🔵 Preview (no SLA — may change)"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Deprecating",
+                    "representation": "warning",
+                    "text": "🟠 Deprecating (existing deployments only)"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Deprecated",
+                    "representation": "critical",
+                    "text": "🔴 Retired (returns 410 Gone)"
+                  },
+                  {
+                    "operator": "isEmpty",
+                    "representation": "info",
+                    "text": "— (no catalog match — custom or 3rd-party model)"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "info",
+                    "text": "ℹ️ {0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "^InferenceRetirement$",
+              "formatter": 6,
+              "formatOptions": {
+                "showIcon": true
+              }
+            },
+            {
+              "columnMatch": "^FineTuneRetirement$",
+              "formatter": 6,
+              "formatOptions": {
+                "showIcon": true
+              }
+            },
+            {
+              "columnMatch": "^CatalogVersion$",
+              "formatter": 1
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Model",
+              "sortOrder": 1
+            }
+          ],
+          "labelSettings": [
+            {
+              "columnId": "Deployment",
+              "label": "Deployment"
+            },
+            {
+              "columnId": "Model",
+              "label": "Model"
+            },
+            {
+              "columnId": "Version",
+              "label": "Deployed version"
+            },
+            {
+              "columnId": "Format",
+              "label": "Format"
+            },
+            {
+              "columnId": "SKU",
+              "label": "SKU"
+            },
+            {
+              "columnId": "Capacity",
+              "label": "Capacity (TPM units)"
+            },
+            {
+              "columnId": "RAIPolicy",
+              "label": "RAI policy"
+            },
+            {
+              "columnId": "LifecycleStatus",
+              "label": "Lifecycle"
+            },
+            {
+              "columnId": "CatalogVersion",
+              "label": "Catalog version"
+            },
+            {
+              "columnId": "InferenceRetirement",
+              "label": "Inference retirement"
+            },
+            {
+              "columnId": "FineTuneRetirement",
+              "label": "Fine-tune retirement"
+            },
+            {
+              "columnId": "ProvisioningState",
+              "label": "State"
+            },
+            {
+              "columnId": "ResourceId",
+              "label": "Resource"
+            }
+          ]
+        },
+        "sortBy": [
+          {
+            "itemKey": "Model",
+            "sortOrder": 1
+          }
+        ]
+      },
+      "name": "deployments-with-retirement-grid",
+      "conditionalVisibilities": [
+        {
+          "parameterName": "SelectedTab",
+          "comparison": "isEqualTo",
+          "value": "models"
+        },
+        {
+          "parameterName": "SelectedAccount",
+          "comparison": "isNotEqualTo",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "💡 **Reading this table:** each row is one of your deployments joined with one published catalog version of that model. If a model has multiple published versions in your region, the deployment appears once per version — **find the row where `Catalog version` equals your `Deployed version`** to read the retirement date that actually applies to your deployment. Empty `Lifecycle` / retirement columns mean the deployed model name was not found in the regional catalog (custom or third-party model).\n\n**Lifecycle status — what each value means** (from the `Microsoft.CognitiveServices/.../models` API):\n\n| Status | Meaning | Retirement dates? |\n|---|---|---|\n| 🟢 **GA** (`GenerallyAvailable`) | Production-ready **Azure OpenAI proprietary** model (e.g. `gpt-4o`, `gpt-5`, `text-embedding-3-*`, `dall-e-3`). Has an SLA. Each `(model, version)` has an **explicit retirement date** published ≥ 6 months in advance. | ✅ Yes — see `Inference retirement` / `Fine-tune retirement` |\n| 🟢 **Stable** | Production-ready **open-source or partner-hosted** model on Microsoft Foundry (e.g. `Phi-*`, `FLUX*`, `Mistral-*`, `Llama-*`, `DeepSeek-*`). No version-based deprecation schedule — replaced as newer releases ship; old versions may be removed without a dated notice. | ❌ Usually empty — track the model's [Foundry catalog page](https://ai.azure.com/explore/models) for updates |\n| 🔵 **Preview** | Early-access / public-preview model. **No SLA**; APIs, prompts, or outputs may change. Not for production workloads. | ❌ N/A — may be promoted to GA/Stable or removed |\n| 🟠 **Deprecating** | On the retirement path. **Existing deployments continue to work** until `Inference retirement`. New deployments may be blocked. | ✅ Yes — migrate now |\n| 🔴 **Retired** (`Deprecated`) | Fully removed. Inference calls return **HTTP 410 Gone**. | ⚠️ Past — must migrate immediately |\n\n**Bottom line:** if you see 🟢 **GA**, plan migrations to the retirement date column. If you see 🟢 **Stable**, the column will be empty — that's expected for Phi / FLUX / Mistral / Llama-class models; check the Foundry catalog instead. 🟠/🔴 = act now.\n\n**References:** [Azure OpenAI model retirement policy](https://learn.microsoft.com/azure/ai-services/openai/concepts/model-retirements) · [Foundry model catalog](https://ai.azure.com/explore/models)",
+        "style": "info"
+      },
+      "name": "deployments-retirement-footnote",
+      "conditionalVisibilities": [
+        {
+          "parameterName": "SelectedTab",
+          "comparison": "isEqualTo",
+          "value": "models"
+        },
+        {
+          "parameterName": "SelectedAccount",
+          "comparison": "isNotEqualTo",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 📋 All Findings\n\n**Stakeholder takeaway:** a consolidated, exportable backlog of every recommendation from every tab - sorted by severity. Export the grid to share with platform / governance teams."
+      },
+      "name": "findings-header",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "findings"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// === SHARED FINDINGS LOGIC — keep in sync via fix-issues.py ===\n// Resource Graph does not index Microsoft.CognitiveServices/accounts/deployments,\n// so model-deployment findings are intentionally absent. Use the 🕒 Model Lifecycle\n// tab for live deployment data via ARM REST.\n// ARG limits queries to 6 joins, so all 4 resource types are unioned first and the\n// lock / PE / ML-child lookups are applied once via 3 leftouter joins.\nresources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces','microsoft.cognitiveservices/accounts/projects')\n| where ('{NameFilter}' == '' or name contains '{NameFilter}')\n| extend _lowerId = tolower(id), _t = tolower(tostring(type))\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.authorization/locks'\n    | extend Scope = tolower(tostring(split(id,'/providers/Microsoft.Authorization/locks/')[0]))\n    | summarize LockCount = count() by Scope\n  ) on $left._lowerId == $right.Scope\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.network/privateendpoints'\n    | mv-expand conn = properties.privateLinkServiceConnections\n    | extend TargetId = tolower(tostring(conn.properties.privateLinkServiceId))\n    | summarize PeCount = count() by TargetId\n  ) on $left._lowerId == $right.TargetId\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints' or type =~ 'microsoft.machinelearningservices/workspaces/computes'\n    | extend Parent = tostring(split(id,'/')[8])\n    | summarize Children = count() by Parent\n  ) on $left.name == $right.Parent\n| extend _missingTags = set_difference(split('{RequiredTagKey}', ','), bag_keys(tags))\n| extend _findings = pack_array(\n    // Public network access (cognitive + search + ML)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces') and tostring(properties.publicNetworkAccess) =~ 'Enabled',\n        bag_pack('Pillar','Security','Severity','High','Check','Public network access is Enabled','Value',tostring(properties.publicNetworkAccess),'Recommendation','Disable public network access and use Private Endpoints + service-tag restrictions.','Doc','https://learn.microsoft.com/azure/ai-services/cognitive-services-virtual-networks'), dynamic(null)),\n    // Local auth (cognitive + search)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices') and tobool(properties.disableLocalAuth) != true,\n        bag_pack('Pillar','Security','Severity',iff(_t =~ 'microsoft.search/searchservices','Medium','High'),'Check','Local auth (API keys) enabled','Value','Enabled','Recommendation','Disable local auth and require Entra ID with managed identity / RBAC.','Doc','https://learn.microsoft.com/azure/ai-services/authentication'), dynamic(null)),\n    // PE-gap (cognitive + search + ML)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces') and (isnull(PeCount) or PeCount == 0),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No Private Endpoint attached','Value','0 endpoints','Recommendation','Attach a Private Endpoint to keep traffic on the Microsoft backbone.','Doc','https://learn.microsoft.com/azure/private-link/private-endpoint-overview'), dynamic(null)),\n    // CMK (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and isnull(properties.encryption.keyVaultProperties),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No customer-managed key (CMK)','Value','Microsoft-managed','Recommendation','If compliance requires it, configure CMK in Key Vault for data at rest.','Doc','https://learn.microsoft.com/azure/ai-services/encryption/cognitive-services-encryption-keys-portal'), dynamic(null)),\n    // Managed identity (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and (isempty(tostring(identity.type)) or tostring(identity.type) =~ 'None'),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No managed identity','Value','None','Recommendation','Assign system or user-assigned managed identity so dependencies use Entra ID, not keys.','Doc','https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview'), dynamic(null)),\n    // HBI (ML only)\n    iff(_t =~ 'microsoft.machinelearningservices/workspaces' and tobool(properties.hbiWorkspace) != true,\n        bag_pack('Pillar','Security','Severity','Low','Check','ML workspace not flagged as HBI','Value','hbiWorkspace=false','Recommendation','If workspace handles regulated data, enable High Business Impact at create time.','Doc','https://learn.microsoft.com/azure/machine-learning/concept-data-encryption'), dynamic(null)),\n    // F0 SKU (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and tostring(sku.name) =~ 'F0',\n        bag_pack('Pillar','Reliability','Severity','High','Check','Free (F0) SKU in use - no SLA','Value','F0','Recommendation','Move production workloads to Standard (S0+) SKU for SLA coverage.','Doc','https://learn.microsoft.com/azure/ai-services/cognitive-services-limited-access'), dynamic(null)),\n    // Search replicas (search only)\n    iff(_t =~ 'microsoft.search/searchservices' and toint(properties.replicaCount) < 2,\n        bag_pack('Pillar','Reliability','Severity','High','Check','AI Search has <2 replicas','Value',tostring(toint(properties.replicaCount)),'Recommendation','Use 2+ replicas for read SLA, 3+ for read/write SLA.','Doc','https://learn.microsoft.com/azure/search/search-capacity-planning'), dynamic(null)),\n    // Foundry project provisioning state (projects only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts/projects' and tostring(properties.provisioningState) !~ 'Succeeded',\n        bag_pack('Pillar','Reliability','Severity','Medium','Check','Foundry project not in Succeeded state','Value',tostring(properties.provisioningState),'Recommendation','Investigate provisioning state; re-provision or delete the project.','Doc','https://learn.microsoft.com/azure/ai-foundry/'), dynamic(null)),\n    // Idle ML workspace (ML only)\n    iff(_t =~ 'microsoft.machinelearningservices/workspaces' and (isnull(Children) or Children == 0),\n        bag_pack('Pillar','Cost','Severity','Low','Check','ML workspace has no compute or endpoints','Value','0 children','Recommendation','Confirm workspace is in use; delete if abandoned.','Doc','https://learn.microsoft.com/azure/machine-learning/how-to-manage-workspace'), dynamic(null)),\n    // Missing tags (all 4 types)\n    iff(array_length(_missingTags) > 0,\n        bag_pack('Pillar','Operational Excellence','Severity','Medium','Check',strcat('Missing required tag(s): ', strcat_array(_missingTags, ', ')),'Value','(empty)','Recommendation','Apply organizational tagging standard (Owner, CostCenter, Env).','Doc','https://learn.microsoft.com/azure/azure-resource-manager/management/tag-resources'), dynamic(null)),\n    // Missing lock (all 4 types)\n    iff(isnull(LockCount) or LockCount == 0,\n        bag_pack('Pillar','Operational Excellence','Severity','Low','Check','No resource lock','Value','0 locks','Recommendation','Apply a CanNotDelete lock on production AI resources to prevent accidental deletion.','Doc','https://learn.microsoft.com/azure/azure-resource-manager/management/lock-resources'), dynamic(null)))\n| mv-expand finding = _findings\n| where isnotnull(finding) and tostring(finding) != ''\n| project Resource=name, Type=type, Pillar=case(\n        tostring(finding.Pillar) =~ 'Security',                strcat('🛡️ ', tostring(finding.Pillar)),\n        tostring(finding.Pillar) =~ 'Reliability',             strcat('🔄 ', tostring(finding.Pillar)),\n        tostring(finding.Pillar) =~ 'Cost',                    strcat('💰 ', tostring(finding.Pillar)),\n        tostring(finding.Pillar) =~ 'Operational Excellence',  strcat('⚙️ ', tostring(finding.Pillar)),\n        tostring(finding.Pillar)), Severity=tostring(finding.Severity), Check=tostring(finding.Check), Value=tostring(finding.Value), Recommendation=tostring(finding.Recommendation), Doc=tostring(finding.Doc), Subscription=subscriptionId, ResourceGroup=resourceGroup, ResourceId=id\n\n| extend SevRank = case(Severity == 'High', 1, Severity == 'Medium', 2, Severity == 'Low', 3, 4)\n| order by SevRank asc, Pillar asc, Resource asc\n| project-away SevRank\n",
+        "size": 0,
+        "title": "All findings across all pillars",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Severity",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "High",
+                    "representation": "4",
+                    "text": "🔴 High"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Medium",
+                    "representation": "3",
+                    "text": "🟠 Medium"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Low",
+                    "representation": "2",
+                    "text": "🟡 Low"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "success",
+                    "text": "{0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "Doc",
+              "formatter": 7,
+              "formatOptions": {
+                "linkTarget": "Url",
+                "linkLabel": "Docs"
+              }
+            },
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 13,
+              "formatOptions": {
+                "linkTarget": "Resource",
+                "showIcon": true
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "Resource"
+            },
+            {
+              "columnId": "Pillar"
+            },
+            {
+              "columnId": "Severity"
+            },
+            {
+              "columnId": "Check"
+            },
+            {
+              "columnId": "Value"
+            },
+            {
+              "columnId": "Recommendation"
+            },
+            {
+              "columnId": "Doc"
+            },
+            {
+              "columnId": "ResourceGroup"
+            },
+            {
+              "columnId": "Subscription"
+            },
+            {
+              "columnId": "ResourceId"
+            }
+          ]
+        }
+      },
+      "name": "findings-table",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "findings"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// === SHARED FINDINGS LOGIC — keep in sync via fix-issues.py ===\n// Resource Graph does not index Microsoft.CognitiveServices/accounts/deployments,\n// so model-deployment findings are intentionally absent. Use the 🕒 Model Lifecycle\n// tab for live deployment data via ARM REST.\n// ARG limits queries to 6 joins, so all 4 resource types are unioned first and the\n// lock / PE / ML-child lookups are applied once via 3 leftouter joins.\nresources\n| where type in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces','microsoft.cognitiveservices/accounts/projects')\n| where ('{NameFilter}' == '' or name contains '{NameFilter}')\n| extend _lowerId = tolower(id), _t = tolower(tostring(type))\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.authorization/locks'\n    | extend Scope = tolower(tostring(split(id,'/providers/Microsoft.Authorization/locks/')[0]))\n    | summarize LockCount = count() by Scope\n  ) on $left._lowerId == $right.Scope\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.network/privateendpoints'\n    | mv-expand conn = properties.privateLinkServiceConnections\n    | extend TargetId = tolower(tostring(conn.properties.privateLinkServiceId))\n    | summarize PeCount = count() by TargetId\n  ) on $left._lowerId == $right.TargetId\n| join kind=leftouter (\n    resources | where type =~ 'microsoft.machinelearningservices/workspaces/onlineendpoints' or type =~ 'microsoft.machinelearningservices/workspaces/computes'\n    | extend Parent = tostring(split(id,'/')[8])\n    | summarize Children = count() by Parent\n  ) on $left.name == $right.Parent\n| extend _missingTags = set_difference(split('{RequiredTagKey}', ','), bag_keys(tags))\n| extend _findings = pack_array(\n    // Public network access (cognitive + search + ML)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces') and tostring(properties.publicNetworkAccess) =~ 'Enabled',\n        bag_pack('Pillar','Security','Severity','High','Check','Public network access is Enabled','Value',tostring(properties.publicNetworkAccess),'Recommendation','Disable public network access and use Private Endpoints + service-tag restrictions.','Doc','https://learn.microsoft.com/azure/ai-services/cognitive-services-virtual-networks'), dynamic(null)),\n    // Local auth (cognitive + search)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices') and tobool(properties.disableLocalAuth) != true,\n        bag_pack('Pillar','Security','Severity',iff(_t =~ 'microsoft.search/searchservices','Medium','High'),'Check','Local auth (API keys) enabled','Value','Enabled','Recommendation','Disable local auth and require Entra ID with managed identity / RBAC.','Doc','https://learn.microsoft.com/azure/ai-services/authentication'), dynamic(null)),\n    // PE-gap (cognitive + search + ML)\n    iff(_t in~ ('microsoft.cognitiveservices/accounts','microsoft.search/searchservices','microsoft.machinelearningservices/workspaces') and (isnull(PeCount) or PeCount == 0),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No Private Endpoint attached','Value','0 endpoints','Recommendation','Attach a Private Endpoint to keep traffic on the Microsoft backbone.','Doc','https://learn.microsoft.com/azure/private-link/private-endpoint-overview'), dynamic(null)),\n    // CMK (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and isnull(properties.encryption.keyVaultProperties),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No customer-managed key (CMK)','Value','Microsoft-managed','Recommendation','If compliance requires it, configure CMK in Key Vault for data at rest.','Doc','https://learn.microsoft.com/azure/ai-services/encryption/cognitive-services-encryption-keys-portal'), dynamic(null)),\n    // Managed identity (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and (isempty(tostring(identity.type)) or tostring(identity.type) =~ 'None'),\n        bag_pack('Pillar','Security','Severity','Medium','Check','No managed identity','Value','None','Recommendation','Assign system or user-assigned managed identity so dependencies use Entra ID, not keys.','Doc','https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview'), dynamic(null)),\n    // HBI (ML only)\n    iff(_t =~ 'microsoft.machinelearningservices/workspaces' and tobool(properties.hbiWorkspace) != true,\n        bag_pack('Pillar','Security','Severity','Low','Check','ML workspace not flagged as HBI','Value','hbiWorkspace=false','Recommendation','If workspace handles regulated data, enable High Business Impact at create time.','Doc','https://learn.microsoft.com/azure/machine-learning/concept-data-encryption'), dynamic(null)),\n    // F0 SKU (cognitive only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts' and tostring(sku.name) =~ 'F0',\n        bag_pack('Pillar','Reliability','Severity','High','Check','Free (F0) SKU in use - no SLA','Value','F0','Recommendation','Move production workloads to Standard (S0+) SKU for SLA coverage.','Doc','https://learn.microsoft.com/azure/ai-services/cognitive-services-limited-access'), dynamic(null)),\n    // Search replicas (search only)\n    iff(_t =~ 'microsoft.search/searchservices' and toint(properties.replicaCount) < 2,\n        bag_pack('Pillar','Reliability','Severity','High','Check','AI Search has <2 replicas','Value',tostring(toint(properties.replicaCount)),'Recommendation','Use 2+ replicas for read SLA, 3+ for read/write SLA.','Doc','https://learn.microsoft.com/azure/search/search-capacity-planning'), dynamic(null)),\n    // Foundry project provisioning state (projects only)\n    iff(_t =~ 'microsoft.cognitiveservices/accounts/projects' and tostring(properties.provisioningState) !~ 'Succeeded',\n        bag_pack('Pillar','Reliability','Severity','Medium','Check','Foundry project not in Succeeded state','Value',tostring(properties.provisioningState),'Recommendation','Investigate provisioning state; re-provision or delete the project.','Doc','https://learn.microsoft.com/azure/ai-foundry/'), dynamic(null)),\n    // Idle ML workspace (ML only)\n    iff(_t =~ 'microsoft.machinelearningservices/workspaces' and (isnull(Children) or Children == 0),\n        bag_pack('Pillar','Cost','Severity','Low','Check','ML workspace has no compute or endpoints','Value','0 children','Recommendation','Confirm workspace is in use; delete if abandoned.','Doc','https://learn.microsoft.com/azure/machine-learning/how-to-manage-workspace'), dynamic(null)),\n    // Missing tags (all 4 types)\n    iff(array_length(_missingTags) > 0,\n        bag_pack('Pillar','Operational Excellence','Severity','Medium','Check',strcat('Missing required tag(s): ', strcat_array(_missingTags, ', ')),'Value','(empty)','Recommendation','Apply organizational tagging standard (Owner, CostCenter, Env).','Doc','https://learn.microsoft.com/azure/azure-resource-manager/management/tag-resources'), dynamic(null)),\n    // Missing lock (all 4 types)\n    iff(isnull(LockCount) or LockCount == 0,\n        bag_pack('Pillar','Operational Excellence','Severity','Low','Check','No resource lock','Value','0 locks','Recommendation','Apply a CanNotDelete lock on production AI resources to prevent accidental deletion.','Doc','https://learn.microsoft.com/azure/azure-resource-manager/management/lock-resources'), dynamic(null)))\n| mv-expand finding = _findings\n| where isnotnull(finding) and tostring(finding) != ''\n| project Resource=name, Type=type, Pillar=case(\n        tostring(finding.Pillar) =~ 'Security',                strcat('🛡️ ', tostring(finding.Pillar)),\n        tostring(finding.Pillar) =~ 'Reliability',             strcat('🔄 ', tostring(finding.Pillar)),\n        tostring(finding.Pillar) =~ 'Cost',                    strcat('💰 ', tostring(finding.Pillar)),\n        tostring(finding.Pillar) =~ 'Operational Excellence',  strcat('⚙️ ', tostring(finding.Pillar)),\n        tostring(finding.Pillar)), Severity=tostring(finding.Severity), Check=tostring(finding.Check), Value=tostring(finding.Value), Recommendation=tostring(finding.Recommendation), Doc=tostring(finding.Doc), Subscription=subscriptionId, ResourceGroup=resourceGroup, ResourceId=id\n\n| summarize Findings = count() by Pillar, Severity\n| extend SevRank = case(Severity == 'High', 1, Severity == 'Medium', 2, Severity == 'Low', 3, 4)\n| order by Pillar asc, SevRank asc\n| project-away SevRank\n",
+        "size": 0,
+        "title": "Finding counts by pillar & severity",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "Pillar",
+          "yAxis": [
+            "Findings"
+          ],
+          "group": "Severity",
+          "createOtherGroup": 0,
+          "showLegend": true,
+          "seriesSettings": [
+            {
+              "seriesName": "High",
+              "color": "redBright"
+            },
+            {
+              "seriesName": "Medium",
+              "color": "orange"
+            },
+            {
+              "seriesName": "Low",
+              "color": "yellow"
+            }
+          ]
+        }
+      },
+      "name": "findings-summary",
+      "conditionalVisibility": {
+        "parameterName": "SelectedTab",
+        "comparison": "isEqualTo",
+        "value": "findings"
+      }
+    }
+  ],
+  "fallbackResourceIds": [
+    "azure monitor"
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

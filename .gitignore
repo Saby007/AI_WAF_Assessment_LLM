@@ -1,0 +1,17 @@
+# Build artifacts
+*.tmp
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# PowerShell
+*.ps1xml
+
+# Local environment
+.env
+.env.local
