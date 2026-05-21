@@ -143,18 +143,88 @@
             "id": "tab-param",
             "version": "KqlParameterItem/1.0",
             "name": "SelectedTab",
-            "type": 10,
+            "type": 1,
             "isRequired": true,
             "value": "overview",
-            "typeSettings": {
-              "additionalResourceOptions": [],
-              "showDefault": false
-            },
-            "jsonData": "[{\"value\": \"overview\", \"label\": \"📊 Overview\", \"selected\": true}, {\"value\": \"security\", \"label\": \"🛡️ Security\"}, {\"value\": \"reliability\", \"label\": \"🔄 Reliability\"}, {\"value\": \"cost\", \"label\": \"💰 Cost\"}, {\"value\": \"ops\", \"label\": \"⚙️ Operational Excellence\"}, {\"value\": \"models\", \"label\": \"🕒 Model Lifecycle\"}, {\"value\": \"findings\", \"label\": \"📋 All Findings\"}]"
+            "hidden": true,
+            "isHiddenWhenLocked": true
           }
         ],
         "style": "pills",
         "queryType": 0
+      },
+      "name": "tabs-state"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "tab-overview",
+            "cellValue": "SelectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "📊  Overview",
+            "subTarget": "overview",
+            "preText": "",
+            "style": "link"
+          },
+          {
+            "id": "tab-security",
+            "cellValue": "SelectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "🛡️  Security",
+            "subTarget": "security",
+            "preText": "",
+            "style": "link"
+          },
+          {
+            "id": "tab-reliability",
+            "cellValue": "SelectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "🔄  Reliability",
+            "subTarget": "reliability",
+            "preText": "",
+            "style": "link"
+          },
+          {
+            "id": "tab-cost",
+            "cellValue": "SelectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "💰  Cost",
+            "subTarget": "cost",
+            "preText": "",
+            "style": "link"
+          },
+          {
+            "id": "tab-ops",
+            "cellValue": "SelectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "⚙️  Operational Excellence",
+            "subTarget": "ops",
+            "preText": "",
+            "style": "link"
+          },
+          {
+            "id": "tab-models",
+            "cellValue": "SelectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "🕒  Model Lifecycle",
+            "subTarget": "models",
+            "preText": "",
+            "style": "link"
+          },
+          {
+            "id": "tab-findings",
+            "cellValue": "SelectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "📋  All Findings",
+            "subTarget": "findings",
+            "preText": "",
+            "style": "link"
+          }
+        ]
       },
       "name": "tabs"
     },
