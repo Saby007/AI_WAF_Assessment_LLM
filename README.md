@@ -6,8 +6,6 @@ An **Azure Monitor Workbook** that gives an architect, FinOps lead, or security 
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fsaby007%2FAI_WAF_Assessment_LLM%2Fmain%2Fazuredeploy.json)
 
-> ⚠️ **Private repo note** — this repo is currently **private**, so the *Deploy to Azure* badge above (and the raw URL below) will only work for users who are signed-in to GitHub **and** have read access to `saby007/AI_WAF_Assessment_LLM`. Make the repo public (`gh repo edit saby007/AI_WAF_Assessment_LLM --visibility public`) if you want one-click deploys for the wider audience.
-
 ---
 
 ## 🎯 Why this exists (the pitch)
