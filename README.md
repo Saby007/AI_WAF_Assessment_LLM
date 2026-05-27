@@ -87,7 +87,7 @@ New-AzResourceGroupDeployment `
 2. Pick one or more **Subscriptions** in the top toolbar (defaults to *all accessible*).
 3. (Optional) Set the **Required tag** (default `Owner`) and a **name filter** — both flow into every grid.
 4. Read the 👔 **Executive Summary** band — that's your one-slide story.
-5. Use the **navigation tabs** across the top — 📊 Overview · 🛡️ Security · 🔄 Reliability · 💰 Cost · ⚙️ Operational Excellence · 🕒 Model Lifecycle · 📋 All Findings — to drill into each Well-Architected pillar.
+5. Use the **navigation tabs** across the top — 📊 Overview · 🛡️ Security · 🔄 Reliability · ⚙️ Operational Excellence · 🕒 Model Lifecycle · 📋 All Findings — to drill into each Well-Architected pillar.
 6. On the **🕒 Model Lifecycle** tab, **click any row in the account catalog** to drill into its live deployments below — the deployments grid only appears once you select an account.
 7. Hit the **🔄 Refresh** icon in the workbook toolbar to re-evaluate at any time. The Model Lifecycle tab re-issues a fresh ARM REST call on every refresh (no caching).
 8. In **📋 All Findings**, use the grid's **⋯ → Export to Excel/CSV** for an offline report.
